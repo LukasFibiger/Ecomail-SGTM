@@ -1,5 +1,5 @@
 homepage: "https://github.com/LukasFibiger/Ecomail-SGTM"
 documentation: "https://github.com/LukasFibiger/Ecomail-SGTM"
 versions:
-  - sha:044761a75f49a45c13ba490443e3967a4d2f8a3a
-    changeNotes:I add option for only update contact in ecomail, without add the contact.
+  - sha:335bea4f9f200c9760ed8b10ed13e7181b7d00bd
+    changeNotes:Setting the order send data in ecomail. If i need send transaction and add new mail. First step is add new user and second step is send transaction. Because ecomail whne can use automatization.
