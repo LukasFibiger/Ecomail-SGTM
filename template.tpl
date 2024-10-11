@@ -1,12 +1,4 @@
-﻿___TERMS_OF_SERVICE___
-
-By creating or modifying this file you agree to Google Tag Manager's Community
-Template Gallery Developer Terms of Service available at
-https://developers.google.com/tag-manager/gallery-tos (or such other URL as
-Google may provide), as modified from time to time.
-
-
-___INFO___
+﻿___INFO___
 
 {
   "type": "TAG",
@@ -165,6 +157,24 @@ ___TEMPLATE_PARAMETERS___
         "type": "SELECT",
         "name": "resubscribe",
         "displayName": "In case of unsubscribed status force resubscribe",
+        "macrosInSelect": true,
+        "selectItems": [
+          {
+            "value": true,
+            "displayValue": "True"
+          },
+          {
+            "value": false,
+            "displayValue": "False"
+          }
+        ],
+        "simpleValueType": true,
+        "defaultValue": false
+      },
+      {
+        "type": "SELECT",
+        "name": "skip_confirmation",
+        "displayName": "Skip double opt-in confirmation",
         "macrosInSelect": true,
         "selectItems": [
           {
@@ -343,6 +353,8 @@ const sendHttpRequest = require('sendHttpRequest');
 const getTimestamp = require('getTimestamp');
 const createRegex = require('createRegex');
 const testRegex = require('testRegex');
+const callLater = require('callLater');
+
 
 //Check IF I have an email in input data. 
 const emailRegex = createRegex('@', 'i');
@@ -468,6 +480,58 @@ if (data.mockServer == true) {
   var url_api_subscribe = 'https://api2.ecomailapp.cz/lists/'+encodeUri(data.email_list_id)+'/'+encodeUri(subscriber_endpoint);
 }
 
+//Set function for send data to Ecomail about transaction or events
+function transaction_send() {
+  if (data.request_type == 'transaction' || data.request_type == 'events') {
+    
+    //if debug_mode On, write complete JSON to Console
+    if (data.debugMode == true) {
+      logToConsole(JSON.stringify({
+        'Point': 'Ecomail - POST data',
+        'POST data': post_data
+      }));
+    }
+      
+      
+    sendHttpRequest(url_api, (statusCode, headers, body) => {
+      if (statusCode >= 200 && statusCode < 300) {
+        if (data.debugMode == true) {
+          logToConsole(JSON.stringify({
+            'Point': 'Ecomail '+data.request_type+' - Success',
+            'ResponseStatusCode': statusCode,
+            'ResponseHeaders': headers,
+            'ResponseBody': body
+          }));
+        }
+        data.gtmOnSuccess();
+      } else {
+        if (data.debugMode == true) {
+          logToConsole(JSON.stringify({
+            'Point': 'Ecomail '+data.request_type+' - Failure',
+            'ResponseStatusCode': statusCode,
+            'ResponseHeaders': headers,
+            'ResponseBody': body
+          }));
+        }
+        data.gtmOnFailure(); 
+      }},
+      {
+        headers: {
+          'content-type': 'application/json',
+          'key': data.api_key
+        },
+        method: 'POST', 
+        timeout: 2000
+       },
+       JSON.stringify(post_data)
+    );
+  }
+}//function transaction_send
+
+//Send data to Ecomail about transaction or events only, when I not wanted add_new_email
+if (data.add_new_email !== true) {
+  transaction_send();
+}
 
 //Add or edit email contact in a list
 if (data.email_list_id && (data.request_type == 'only_add_email' || (data.request_type == 'transaction' && (data.add_new_email == true || data.update_existing == true)))) {
@@ -501,6 +565,7 @@ if (data.email_list_id && (data.request_type == 'only_add_email' || (data.reques
       },
         "trigger_autoresponders": data.trigger_autoresponders,
         "update_existing": data.update_existing,
+        "skip_confirmation": data.skip_confirmation,
         "resubscribe": data.resubscribe
     };
   }
@@ -523,6 +588,7 @@ if (data.email_list_id && (data.request_type == 'only_add_email' || (data.reques
           'ResponseBody': body
         }));
       }
+      transaction_send();
       data.gtmOnSuccess();
     } else {
       if (data.debugMode == true) {
@@ -533,8 +599,8 @@ if (data.email_list_id && (data.request_type == 'only_add_email' || (data.reques
           'ResponseBody': body
         }));
       }
-      data.gtmOnFailure(); 
-    
+      transaction_send();
+      data.gtmOnFailure();     
     }},
     {
       headers: {
@@ -548,52 +614,6 @@ if (data.email_list_id && (data.request_type == 'only_add_email' || (data.reques
   );
 
 }//add or edit contact
-
-//Send data to Ecomail about transaction or events
-if (data.request_type == 'transaction' || data.request_type == 'events') {
-
-  //if debug_mode On, write complete JSON to Console
-  if (data.debugMode == true) {
-    logToConsole(JSON.stringify({
-      'Point': 'Ecomail - POST data',
-      'POST data': post_data
-    }));
-  }
-  
-  
-  sendHttpRequest(url_api, (statusCode, headers, body) => {
-    if (statusCode >= 200 && statusCode < 300) {
-      if (data.debugMode == true) {
-        logToConsole(JSON.stringify({
-          'Point': 'Ecomail '+data.request_type+' - Success',
-          'ResponseStatusCode': statusCode,
-          'ResponseHeaders': headers,
-          'ResponseBody': body
-        }));
-      }
-      data.gtmOnSuccess();
-    } else {
-      if (data.debugMode == true) {
-        logToConsole(JSON.stringify({
-          'Point': 'Ecomail '+data.request_type+' - Failure',
-          'ResponseStatusCode': statusCode,
-          'ResponseHeaders': headers,
-          'ResponseBody': body
-        }));
-      }
-      data.gtmOnFailure(); 
-    }},
-    {
-      headers: {
-        'content-type': 'application/json',
-        'key': data.api_key
-      },
-      method: 'POST', 
-      timeout: 2000
-     },
-     JSON.stringify(post_data)
-  );
-}
 
 
 ___SERVER_PERMISSIONS___
