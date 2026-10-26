@@ -120,7 +120,7 @@ ___TEMPLATE_PARAMETERS___
       {
         "type": "SELECT",
         "name": "trigger_autoresponders",
-        "displayName": "Trigger automations on subscribe",
+        "displayName": "Trigger automations when the subscriber is added (trigger_autoresponders).",
         "macrosInSelect": true,
         "selectItems": [
           {
@@ -138,7 +138,7 @@ ___TEMPLATE_PARAMETERS___
       {
         "type": "SELECT",
         "name": "update_existing",
-        "displayName": "Update an already existing subscriber",
+        "displayName": "Update an already existing subscriber (update_existing).",
         "macrosInSelect": true,
         "selectItems": [
           {
@@ -156,7 +156,7 @@ ___TEMPLATE_PARAMETERS___
       {
         "type": "SELECT",
         "name": "resubscribe",
-        "displayName": "In case of unsubscribed status force resubscribe",
+        "displayName": "Force resubscribe if the subscriber was previously unsubscribed (resubscribe)",
         "macrosInSelect": true,
         "selectItems": [
           {
@@ -174,7 +174,25 @@ ___TEMPLATE_PARAMETERS___
       {
         "type": "SELECT",
         "name": "skip_confirmation",
-        "displayName": "Skip double opt-in confirmation",
+        "displayName": "Skip double opt-in confirmation (skip_confirmation)",
+        "macrosInSelect": true,
+        "selectItems": [
+          {
+            "value": true,
+            "displayValue": "True"
+          },
+          {
+            "value": false,
+            "displayValue": "False"
+          }
+        ],
+        "simpleValueType": true,
+        "defaultValue": false
+      },
+      {
+        "type": "SELECT",
+        "name": "trigger_notification",
+        "displayName": "Send a notification about the new subscriber if configured in list settings (trigger_notification).",
         "macrosInSelect": true,
         "selectItems": [
           {
@@ -267,11 +285,10 @@ ___TEMPLATE_PARAMETERS___
         "simpleValueType": true
       },
       {
-        "type": "CHECKBOX",
+        "type": "TEXT",
         "name": "add_new_email",
-        "checkboxText": "Add new email",
-        "simpleValueType": true,
-        "help": "If you select true, I add the e-mail as new user into ecomail system. I recomnded."
+        "displayName": "Add email as new user into ecomail ?",
+        "simpleValueType": true
       }
     ]
   },
@@ -286,7 +303,7 @@ ___TEMPLATE_PARAMETERS___
         "name": "items",
         "displayName": "Items (for transaction and cart)",
         "simpleValueType": true,
-        "help": "I need array items in GA4 format"
+        "help": "I need array items in GA4 format + field url and img_url"
       },
       {
         "type": "TEXT",
@@ -294,6 +311,13 @@ ___TEMPLATE_PARAMETERS___
         "displayName": "Object key with price of product",
         "simpleValueType": true,
         "defaultValue": "price"
+      },
+      {
+        "type": "TEXT",
+        "name": "item_categories",
+        "displayName": "Object key with categories of product",
+        "simpleValueType": true,
+        "defaultValue": ""
       }
     ]
   },
@@ -355,6 +379,17 @@ const createRegex = require('createRegex');
 const testRegex = require('testRegex');
 const callLater = require('callLater');
 
+//Coversion datatype
+const updateExisting = (data.update_existing === true || data.update_existing === 'true');
+const AddNewEmail = (data.add_new_email === true || data.add_new_email === 'true');
+const SkipConfirmation = (data.skip_confirmation === true || data.skip_confirmation === 'true');
+const resubscribe = (data.resubscribe === true || data.resubscribe === 'true');
+const TriggerAutoresponders = (data.trigger_autoresponders === true || data.trigger_autoresponders === 'true');
+const TriggerNotification = (data.trigger_notification === true || data.trigger_notification === 'true');
+
+
+
+
 
 //Check IF I have an email in input data. 
 const emailRegex = createRegex('@', 'i');
@@ -393,7 +428,7 @@ if (data.request_type == 'transaction') {
   };
 }
 
-//If I recognize than user wants event "Add to cart" I set value to special format for this situation. And I transform items from GA4 format to especialy format fro ecomail events.
+//If I recognize than user wants event "Add to cart" I set value to special format for this situation. And I transform items from GA4 format to especialy format to ecomail events.
 if (data.event_action == 'Basket' && data.event_label == 'Basket' && typeof data.items != 'undefined') {
   var cart_event_value = { 
     data: {
@@ -403,6 +438,7 @@ if (data.event_action == 'Basket' && data.event_label == 'Basket' && typeof data
       }
     }
   };
+
   data.items.forEach(function(produkt, index) {
     cart_event_value.data.data.products[index] = {
       'productId': produkt.item_id,
@@ -411,6 +447,7 @@ if (data.event_action == 'Basket' && data.event_label == 'Basket' && typeof data
       'name': produkt.item_name,
       'price': produkt[data.items_price]
     } ;
+
     //Add parameters to event name tags
     var product_params_to_description = [];
     if (typeof data.params_to_tags != 'undefined') {
@@ -421,13 +458,14 @@ if (data.event_action == 'Basket' && data.event_label == 'Basket' && typeof data
       });
       cart_event_value.data.data.products[index].description = product_params_to_description;
     }
-    
+
   });
   
   post_data.event.value = JSON.stringify(cart_event_value);
+
 }
 
-//Convert products from GA4 format to ecomail format and insert into POST request. If products exists.
+//Convert products from GA4 format to ecomail format and insert into POST request. If exists array of products.
 if (data.request_type == 'transaction' && typeof data.items != 'undefined') {
   var categoryKeys = ['item_category', 'item_category2', 'item_category3', 'item_category4', 'item_category5'];
   
@@ -438,10 +476,20 @@ if (data.request_type == 'transaction' && typeof data.items != 'undefined') {
         combinedCategories.push(produkt[key]);
       }
     }
+    
+    var productCategorieArray = [];
+    if (produkt[data.item_categories]) {
+      productCategorieArray = produkt[data.item_categories]
+        .split('|')
+        .map(function(item) { return item.trim(); })
+        .filter(function(item) { return item.length > 0; });
+    }
+    
     post_data.transaction_items[index] = {
       'code': produkt.item_id,
       'title': produkt.item_name,
-      'category': combinedCategories.join(' | '),
+      'category': productCategorieArray.join(' | '),
+      'categories': productCategorieArray,
       'price': produkt[data.items_price],
       'amount': produkt.quantity
     } ;
@@ -462,14 +510,13 @@ if (data.request_type == 'transaction' && typeof data.items != 'undefined') {
 }
 
 //SetUp method and URL to subscribers. 
-if (data.update_existing == true && data.add_new_email == false) {
+if (updateExisting == true && AddNewEmail == false) {
   var method = 'PUT';
   var subscriber_endpoint = 'update-subscriber';
 } else {
   var method = 'POST';
   var subscriber_endpoint = 'subscribe';  
 }
-
 
 //When I have use mock server
 if (data.mockServer == true) {
@@ -480,10 +527,25 @@ if (data.mockServer == true) {
   var url_api_subscribe = 'https://api2.ecomailapp.cz/lists/'+encodeUri(data.email_list_id)+'/'+encodeUri(subscriber_endpoint);
 }
 
+//Sledování běžících požadavků – gtmOnSuccess/gtmOnFailure se zavolá právě jednou, až doběhnou všechny
+var pendingRequests = 0;
+var anyFailure = false;
+var transactionSent = false;
+function requestDone(ok) {
+  if (!ok) anyFailure = true;
+  pendingRequests--;
+  if (pendingRequests <= 0) {
+    if (anyFailure) { data.gtmOnFailure(); } else { data.gtmOnSuccess(); }
+  }
+}
+
 //Set function for send data to Ecomail about transaction or events
 function transaction_send() {
+  //Pojistka: transakci/event pošli maximálně jednou za běh tagu
+  if (transactionSent) return;
   if (data.request_type == 'transaction' || data.request_type == 'events') {
-    
+    transactionSent = true;
+    pendingRequests++;
     //if debug_mode On, write complete JSON to Console
     if (data.debugMode == true) {
       logToConsole(JSON.stringify({
@@ -491,7 +553,6 @@ function transaction_send() {
         'POST data': post_data
       }));
     }
-      
       
     sendHttpRequest(url_api, (statusCode, headers, body) => {
       if (statusCode >= 200 && statusCode < 300) {
@@ -503,7 +564,7 @@ function transaction_send() {
             'ResponseBody': body
           }));
         }
-        data.gtmOnSuccess();
+        requestDone(true);
       } else {
         if (data.debugMode == true) {
           logToConsole(JSON.stringify({
@@ -513,7 +574,7 @@ function transaction_send() {
             'ResponseBody': body
           }));
         }
-        data.gtmOnFailure(); 
+        requestDone(false);
       }},
       {
         headers: {
@@ -527,16 +588,14 @@ function transaction_send() {
     );
   }
 }//function transaction_send
-
 //Send data to Ecomail about transaction or events only, when I not wanted add_new_email
-if (data.add_new_email !== true) {
+if ((data.request_type == 'transaction' && AddNewEmail !== true) ||  data.request_type == 'events') {
   transaction_send();
 }
 
 //Add or edit email contact in a list
-if (data.email_list_id && (data.request_type == 'only_add_email' || (data.request_type == 'transaction' && (data.add_new_email == true || data.update_existing == true)))) {
-
-  if (data.update_existing == true && data.add_new_email == false) {
+if (data.email_list_id && (data.request_type == 'only_add_email' || (data.request_type == 'transaction' && (AddNewEmail == true || updateExisting == true)))) {
+  if (updateExisting == true && AddNewEmail == false) {
     var post_data_subscribe = {   
       'email': data.email,
       'subscriber_data': {
@@ -548,9 +607,10 @@ if (data.email_list_id && (data.request_type == 'only_add_email' || (data.reques
         "country": data.user_country,
         "phone": data.user_phone,
         "source": data.user_source
-      }
+      },
+        "update_existing": updateExisting
     }; 
-  } else {
+  } else if (AddNewEmail == true) {
     var post_data_subscribe = {   
       'subscriber_data': {
         "name": data.user_name,
@@ -563,11 +623,14 @@ if (data.email_list_id && (data.request_type == 'only_add_email' || (data.reques
         "phone": data.user_phone,
         "source": data.user_source,      
       },
-        "trigger_autoresponders": data.trigger_autoresponders,
-        "update_existing": data.update_existing,
-        "skip_confirmation": data.skip_confirmation,
-        "resubscribe": data.resubscribe
+        "trigger_autoresponders": TriggerAutoresponders,
+        "trigger_notification": TriggerNotification,      
+        "update_existing": updateExisting,
+        "skip_confirmation": SkipConfirmation,
+        "resubscribe": resubscribe
     };
+  } else {
+    var post_data_subscribe = false ;
   }
 
   //if debug_mode On, write complete JSON to Console
@@ -577,43 +640,50 @@ if (data.email_list_id && (data.request_type == 'only_add_email' || (data.reques
       'POST data': post_data_subscribe
     }));
   }
-
-  sendHttpRequest(url_api_subscribe, (statusCode, headers, body) => {
-    if (statusCode >= 200 && statusCode < 300) {
-      if (data.debugMode == true) {
-        logToConsole(JSON.stringify({
-          'Point': 'Ecomail subscribe - Success',
-          'ResponseStatusCode': statusCode,
-          'ResponseHeaders': headers,
-          'ResponseBody': body
-        }));
-      }
-      transaction_send();
-      data.gtmOnSuccess();
-    } else {
-      if (data.debugMode == true) {
-        logToConsole(JSON.stringify({
-          'Point': 'Ecomail subscribe - Failure',
-          'ResponseStatusCode': statusCode,
-          'ResponseHeaders': headers,
-          'ResponseBody': body
-        }));
-      }
-      transaction_send();
-      data.gtmOnFailure();     
-    }},
-    {
-      headers: {
-        'content-type': 'application/json',
-        'key': data.api_key
-      },
-      method: method, 
-      timeout: 2000
-     },
-     JSON.stringify(post_data_subscribe)
-  );
-
+  if (post_data_subscribe) {
+    pendingRequests++;
+    sendHttpRequest(url_api_subscribe, (statusCode, headers, body) => {
+      if (statusCode >= 200 && statusCode < 300) {
+        if (data.debugMode == true) {
+          logToConsole(JSON.stringify({
+            'Point': 'Ecomail subscribe - Success',
+            'ResponseStatusCode': statusCode,
+            'ResponseHeaders': headers,
+            'ResponseBody': body
+          }));
+        }
+        //Transakci posílám až po subscribe jen tehdy, když nešla hned (AddNewEmail == true)
+        if (AddNewEmail == true) { transaction_send(); }
+        requestDone(true);
+      } else {
+        if (data.debugMode == true) {
+          logToConsole(JSON.stringify({
+            'Point': 'Ecomail subscribe - Failure',
+            'ResponseStatusCode': statusCode,
+            'ResponseHeaders': headers,
+            'ResponseBody': body
+          }));
+        }
+        if (AddNewEmail == true) { transaction_send(); }
+        requestDone(false);
+      }},
+      {
+        headers: {
+          'content-type': 'application/json',
+          'key': data.api_key
+        },
+        method: method, 
+        timeout: 2000
+       },
+       JSON.stringify(post_data_subscribe)
+    );
+  }
 }//add or edit contact
+
+//Nic se neodesílalo -> ukonči tag
+if (pendingRequests == 0) {
+  data.gtmOnSuccess();
+}
 
 
 ___SERVER_PERMISSIONS___
