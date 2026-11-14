@@ -310,14 +310,16 @@ ___TEMPLATE_PARAMETERS___
         "name": "items_price",
         "displayName": "Object key with price of product",
         "simpleValueType": true,
-        "defaultValue": "price"
+        "defaultValue": "price",
+        "help": "Key with UNIT price (incl. VAT) in item. For transactions the template sends unit price × quantity (Ecomail expects total price for the given quantity). If the key is missing in an item, \"price\" is used."
       },
       {
         "type": "TEXT",
         "name": "item_categories",
         "displayName": "Object key with categories of product",
         "simpleValueType": true,
-        "defaultValue": ""
+        "defaultValue": "",
+        "help": "Optional. Key in item with categories as string separated by | or as array. If empty, item_category … item_category5 are used. Sent as Ecomail \"categories\" (max 20, max 100 chars each)."
       }
     ]
   },
@@ -378,6 +380,10 @@ const getTimestamp = require('getTimestamp');
 const createRegex = require('createRegex');
 const testRegex = require('testRegex');
 const callLater = require('callLater');
+const makeNumber = require('makeNumber');
+const makeString = require('makeString');
+const getType = require('getType');
+const Math = require('Math');
 
 //Coversion datatype
 const updateExisting = (data.update_existing === true || data.update_existing === 'true');
@@ -477,22 +483,48 @@ if (data.request_type == 'transaction' && typeof data.items != 'undefined') {
       }
     }
     
-    var productCategorieArray = [];
-    if (produkt[data.item_categories]) {
-      productCategorieArray = produkt[data.item_categories]
-        .split('|')
-        .map(function(item) { return item.trim(); })
-        .filter(function(item) { return item.length > 0; });
+    //Categories: Ecomail wants array "categories" (max 20 items, max 100 chars each); "category" (string) is deprecated.
+    //Source: key from item_categories (string with "|" or array). If not set or empty -> item_category..item_category5.
+    var rawCategories = [];
+    var customCategories = data.item_categories ? produkt[data.item_categories] : undefined;
+    if (typeof customCategories == 'string' && customCategories.length > 0) {
+      rawCategories = customCategories.split('|');
+    } else if (getType(customCategories) == 'array' && customCategories.length > 0) {
+      rawCategories = customCategories;
+    } else {
+      rawCategories = combinedCategories;
     }
+    var productCategorieArray = [];
+    rawCategories.forEach(function(item) {
+      var cat = makeString(item).trim().substring(0, 100);
+      if (cat.length > 0 && productCategorieArray.indexOf(cat) < 0 && productCategorieArray.length < 20) {
+        productCategorieArray.push(cat);
+      }
+    });
+
+    //Price: Ecomail wants total price for the given quantity -> unit price * quantity.
+    //Unit price from key in items_price; if the key is missing in the item, fallback to "price".
+    var unitPrice = produkt[data.items_price];
+    if ((typeof unitPrice == 'undefined' || unitPrice === null || unitPrice === '') && data.items_price != 'price') {
+      if (data.debugMode == true) {
+        logToConsole('Ecomail: item ' + produkt.item_id + ' has no key "' + data.items_price + '", using "price" instead.');
+      }
+      unitPrice = produkt.price;
+    }
+    var quantity = makeNumber(produkt.quantity);
+    if (!(quantity > 0)) { quantity = 1; }
+    var totalPrice = makeNumber(unitPrice);
     
     post_data.transaction_items[index] = {
       'code': produkt.item_id,
       'title': produkt.item_name,
       'category': productCategorieArray.join(' | '),
       'categories': productCategorieArray,
-      'price': produkt[data.items_price],
       'amount': produkt.quantity
     } ;
+    if (totalPrice === totalPrice && typeof unitPrice != 'undefined' && unitPrice !== null && unitPrice !== '') {
+      post_data.transaction_items[index].price = Math.round(totalPrice * quantity * 100) / 100;
+    }
     
     
     //Add parameters to event name tags
